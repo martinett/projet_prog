@@ -124,7 +124,7 @@ def network_graph(yearRange, AccountToSearch):
 
     traceRecode = []  # contains edge_trace, node_trace, middle_node_trace
     ############################################################################################################################################################
-    colors = list(Color('orange').range_to(Color('darkred'), max(edge1['qt'])+1))
+    colors = list(Color('lightyellow').range_to(Color('darkred'), max(edge1['qt'])-min(edge1['qt'])+1))
     colors = ['rgb' + color_to_str(x.rgb) for x in colors]
 
     # index = 0
@@ -135,7 +135,7 @@ def network_graph(yearRange, AccountToSearch):
         trace = go.Scatter(x=tuple([x0, x1, None]), y=tuple([y0, y1, None]),
                             mode='lines',
                             line={'width': 1},
-                            marker=dict(color=colors[G.edges[edge]['qt']]),
+                            marker=dict(color=colors[G.edges[edge]['qt']-min(edge1['qt'])]),
                             line_shape='spline',
                             opacity=1)
         traceRecode.append(trace)
