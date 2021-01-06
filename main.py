@@ -33,23 +33,28 @@ external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 app.title = "Transaction Network"
 
-YEAR=[2010, 2019]
-ACCOUNT="A0001"
+ACCOUNT="data"
+
+corpus = Corpus("data")
+corpus.download_collection(10)
+A = corpus.get_adjacency_matrix()
 
 ##############################################################################################################################################################
-def network_graph(yearRange, AccountToSearch):
-
+def network_graph(WordsToSearch):
+    
     #edge1 = pd.read_csv('edge1.csv')
     #node1 = pd.read_csv('node1.csv')
-    corpus = Corpus("data")
-    corpus.download_collection(100)
-    A = corpus.get_adjacency_matrix()
     
-    #filtre actuel : 20 mots les plus fréquents
-    words = corpus.most_frequent_words(30)
-    A = A.loc[words,words]
+    #filtre par rapport à l'input de filtre
+    words = set(WordsToSearch.split(";"))
+    if "" in words:
+        words.remove("")
+    words.update(A.loc[words].loc[:,(A.loc[words]!=0).any(axis=0)].columns)
     
-    edge1 = A.stack()
+    #filtre sur les 20 mots les plus fréquents
+    # words = corpus.most_frequent_words(30)
+    
+    edge1 = A.loc[words,words].stack()
     edge1 = edge1.reset_index()
     edge1 = edge1[edge1[0] != 0]
     edge1["from"] = edge1.apply(lambda x : min(x[["level_0","level_1"]]), axis=1)
@@ -74,11 +79,11 @@ def network_graph(yearRange, AccountToSearch):
     # to define the centric point of the networkx layout
     shells=[]
     shell1=[]
-    shell1.append(AccountToSearch)
+    shell1.append(WordsToSearch)
     shells.append(shell1)
     shell2=[]
     for ele in accountSet:
-        if ele!=AccountToSearch:
+        if ele!=WordsToSearch:
             shell2.append(ele)
     shells.append(shell2)
 
@@ -213,7 +218,7 @@ styles = {
 
 app.layout = html.Div([
     #########################Title
-    html.Div([html.H1("Transaction Network Graph")],
+    html.Div([html.H1("Co-occurrences des mots du Corpus \"Data\"")],
              className="row",
              style={'textAlign': "center"}),
     #############################################################################################define the row
@@ -224,45 +229,45 @@ app.layout = html.Div([
             html.Div(
                 className="two columns",
                 children=[
-                    dcc.Markdown(d("""
-                            **Time Range To Visualize**
-                            Slide the bar to define year range.
-                            """)),
-                    html.Div(
-                        className="twelve columns",
-                        children=[
-                            dcc.RangeSlider(
-                                id='my-range-slider',
-                                min=2010,
-                                max=2019,
-                                step=1,
-                                value=[2010, 2019],
-                                marks={
-                                    2010: {'label': '2010'},
-                                    2011: {'label': '2011'},
-                                    2012: {'label': '2012'},
-                                    2013: {'label': '2013'},
-                                    2014: {'label': '2014'},
-                                    2015: {'label': '2015'},
-                                    2016: {'label': '2016'},
-                                    2017: {'label': '2017'},
-                                    2018: {'label': '2018'},
-                                    2019: {'label': '2019'}
-                                }
-                            ),
-                            html.Br(),
-                            html.Div(id='output-container-range-slider')
-                        ],
-                        style={'height': '300px'}
-                    ),
+                    # dcc.Markdown(d("""
+                    #         **Time Range To Visualize**
+                    #         Slide the bar to define year range.
+                    #         """)),
+                    # html.Div(
+                    #     className="twelve columns",
+                    #     children=[
+                    #         dcc.RangeSlider(
+                    #             id='my-range-slider',
+                    #             min=2010,
+                    #             max=2019,
+                    #             step=1,
+                    #             value=[2010, 2019],
+                    #             marks={
+                    #                 2010: {'label': '2010'},
+                    #                 2011: {'label': '2011'},
+                    #                 2012: {'label': '2012'},
+                    #                 2013: {'label': '2013'},
+                    #                 2014: {'label': '2014'},
+                    #                 2015: {'label': '2015'},
+                    #                 2016: {'label': '2016'},
+                    #                 2017: {'label': '2017'},
+                    #                 2018: {'label': '2018'},
+                    #                 2019: {'label': '2019'}
+                    #             }
+                    #         ),
+                    #         html.Br(),
+                    #         html.Div(id='output-container-range-slider')
+                    #     ],
+                    #     style={'height': '300px'}
+                    # ),
                     html.Div(
                         className="twelve columns",
                         children=[
                             dcc.Markdown(d("""
-                            **Account To Search**
-                            Input the account to visualize.
+                            **Words To Search**
+                            Input the words to visualize.
                             """)),
-                            dcc.Input(id="input1", type="text", placeholder="Account"),
+                            dcc.Input(id="words", type="text", placeholder="Words", value="data;"),
                             html.Div(id="output")
                         ],
                         style={'height': '300px'}
@@ -274,7 +279,7 @@ app.layout = html.Div([
             html.Div(
                 className="eight columns",
                 children=[dcc.Graph(id="my-graph",
-                                    figure=network_graph(YEAR, ACCOUNT))],
+                                    figure=network_graph(ACCOUNT))],
             ),
 
             #########################################right side two output component
@@ -311,13 +316,12 @@ app.layout = html.Div([
 ###################################callback for left side components
 @app.callback(
     dash.dependencies.Output('my-graph', 'figure'),
-    [dash.dependencies.Input('my-range-slider', 'value'), dash.dependencies.Input('input1', 'value')])
-def update_output(value,input1):
-    global YEAR
+    [#dash.dependencies.Input('my-range-slider', 'value'),
+     dash.dependencies.Input('words', 'value')])
+def update_output(words):
     global ACCOUNT
-    YEAR = value
-    ACCOUNT = input1
-    return network_graph(value, input1)
+    ACCOUNT = words
+    return network_graph(words)
     # to update the global variable of YEAR and ACCOUNT
 ################################callback for right side components
 @app.callback(
