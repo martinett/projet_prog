@@ -58,8 +58,8 @@ class Corpus:
     
     def download_collection(self, n=10):
         docs = []
-        n1 = n//2
-        n2 = n-n1
+        n2 = n//2
+        n1 = n-n2
         if n1 > 0:
             docs.extend(self._get_reddit_posts_as_documents(n1))
         if n2 > 0:

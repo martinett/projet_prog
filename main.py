@@ -33,28 +33,41 @@ external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 app.title = "Transaction Network"
 
-ACCOUNT="data"
+ACCOUNT="data;"
+NSUBMIT=0
+FIG=None
 
+nb_docs = 3
 corpus = Corpus("data")
-corpus.download_collection(10)
+corpus.download_collection(nb_docs)
 A = corpus.get_adjacency_matrix()
 
 ##############################################################################################################################################################
 def network_graph(WordsToSearch):
+    WordsToSearch = set(WordsToSearch.split(";"))
+    if "" in WordsToSearch:
+        WordsToSearch.remove("")
     
     #edge1 = pd.read_csv('edge1.csv')
     #node1 = pd.read_csv('node1.csv')
     
     #filtre par rapport à l'input de filtre
-    words = set(WordsToSearch.split(";"))
-    if "" in words:
-        words.remove("")
-    words.update(A.loc[words].loc[:,(A.loc[words]!=0).any(axis=0)].columns)
+    words = WordsToSearch.copy()
+    if len(words) > 0:
+        words.update(A.loc[words].loc[:,(A.loc[words]!=0).any(axis=0)].columns)
+    else:
+        words.update(A.columns)
+    Ap = A.loc[words]
     
-    #filtre sur les 20 mots les plus fréquents
+    #filtre sur les 30 mots les plus fréquents
     # words = corpus.most_frequent_words(30)
     
-    edge1 = A.loc[words,words].stack()
+    #filtre sur les mots plus fréquents que la moyenne
+    moyennes = Ap.mean()
+    moyenne = moyennes.mean()
+    words = set(moyennes[moyennes>=moyenne].index)
+    
+    edge1 = Ap.loc[words,words].stack()
     edge1 = edge1.reset_index()
     edge1 = edge1[edge1[0] != 0]
     edge1["from"] = edge1.apply(lambda x : min(x[["level_0","level_1"]]), axis=1)
@@ -79,7 +92,7 @@ def network_graph(WordsToSearch):
     # to define the centric point of the networkx layout
     shells=[]
     shell1=[]
-    shell1.append(WordsToSearch)
+    shell1.extend(WordsToSearch)
     shells.append(shell1)
     shell2=[]
     for ele in accountSet:
@@ -183,7 +196,7 @@ def network_graph(WordsToSearch):
     #################################################################################################################################################################
     figure = {
         "data": traceRecode,
-        "layout": go.Layout(title='Interactive Transaction Visualization', showlegend=False, hovermode='closest',
+        "layout": go.Layout(title='Co-occurrences des mots '+str(WordsToSearch)+"\nNombre de noeuds : "+str(len(words)), showlegend=False, hovermode='closest',
                             margin={'b': 40, 'l': 40, 'r': 40, 't': 40},
                             xaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
                             yaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
@@ -267,7 +280,7 @@ app.layout = html.Div([
                             **Words To Search**
                             Input the words to visualize.
                             """)),
-                            dcc.Input(id="words", type="text", placeholder="Words", value="data;"),
+                            dcc.Input(id="words", type="text", placeholder="Words", value="data;", n_submit=1),
                             html.Div(id="output")
                         ],
                         style={'height': '300px'}
@@ -316,12 +329,20 @@ app.layout = html.Div([
 ###################################callback for left side components
 @app.callback(
     dash.dependencies.Output('my-graph', 'figure'),
-    [#dash.dependencies.Input('my-range-slider', 'value'),
-     dash.dependencies.Input('words', 'value')])
-def update_output(words):
+    [dash.dependencies.Input('words', 'value'),
+     dash.dependencies.Input('words', 'n_submit')
+     ])
+def update_output(words, n):
     global ACCOUNT
-    ACCOUNT = words
-    return network_graph(words)
+    global NSUBMIT
+    global FIG
+    if FIG == None or n > NSUBMIT:
+        if n > NSUBMIT:
+            NSUBMIT = n
+            ACCOUNT = words
+        FIG = network_graph(ACCOUNT)
+        print("finished")
+    return FIG
     # to update the global variable of YEAR and ACCOUNT
 ################################callback for right side components
 @app.callback(
