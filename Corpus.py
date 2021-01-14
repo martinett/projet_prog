@@ -59,14 +59,14 @@ class Corpus:
             self._add_authors(docid)
             self.whole_textual_content += doc.texte + " " + doc.titre
     
-    def download_collection(self, n=10):
+    def download_collection(self, n=10, keyword="data"):
         docs = []
         n2 = n//2
         n1 = n-n2
         if n1 > 0:
-            docs.extend(self._get_reddit_posts_as_documents(n1))
+            docs.extend(self._get_reddit_posts_as_documents(n1, keyword=keyword))
         if n2 > 0:
-            docs.extend(self._get_arxiv_publications_as_documents(n2))
+            docs.extend(self._get_arxiv_publications_as_documents(n2, keyword=keyword))
         for doc in docs:
             self.add_document(doc)
     

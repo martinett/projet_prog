@@ -7,12 +7,15 @@ import networkx as nx
 import plotly.graph_objs as go
 
 import pandas as pd
+import numpy as np
 from colour import Color
 from textwrap import dedent as d
 import json
 import decimal
 
 from Corpus import Corpus
+
+from sklearn.neighbors import KernelDensity
 
 ctx = decimal.Context()
 ctx.prec = 20
@@ -28,363 +31,400 @@ def float_to_str(f):
 def color_to_str(c):
     return "("+", ".join(map(float_to_str, c))+")"
 
-# import the css template, and pass the css template into dash
-external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
-app.title = "Transaction Network"
 
-def main(theme="data", nb_docs=20):
-    global ACCOUNT
-    global NSUBMIT
-    global FIG
-    global corpus
-    global A
-    
-    ACCOUNT = theme+";"
-    NSUBMIT = 0
-    FIG = None
-    
-    corpus = Corpus(theme)
-    corpus.download_collection(nb_docs)
-    A = corpus.get_adjacency_matrix()
-    
-    
-    ######################################################################################################################################################################
-    # styles: for right side hover/click component
-    styles = {
-        'pre': {
-            'border': 'thin lightgrey solid',
-            'overflowX': 'scroll'
+class App:
+    def __init__(self, theme="data", nb_docs=20):
+        self.NSUBMIT_words = 0
+        self.NSUBMIT_corpus = 0
+        self.FIG = None
+        
+        self.setup_corpus(theme, nb_docs)
+        self.setup_dash()
+        #self.setup_dash("Co-occurrences des mots du Corpus \""+theme+"\"")
+        self.callbacks()
+        self.launch()
+
+    def setup_corpus(self, theme, nb_docs):
+        self.WORDS = theme+";"
+        self.DEGCEN = {}
+        self.CLOCEN = {}
+        self.BETCEN = {}
+        self.THEME = theme
+        self.NB_DOCS = nb_docs
+        self.corpus = Corpus(theme)
+        self.corpus.download_collection(nb_docs, keyword=theme)
+        self.A = self.corpus.get_adjacency_matrix()
+
+    def setup_dash(self):
+        # create the dash app,
+        # import the css template,
+        # and pass the css template into dash
+        self.app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
+        self.app.title = "Projet Prog"
+        ######################################################################################################################################################################
+        # styles: for right side hover/click component
+        styles = {
+            'pre': {
+                'border': 'thin lightgrey solid',
+                'overflowX': 'scroll'
+            }
         }
-    }
+        
+        self.FIG = self.network_graph()
+        
+        self.app.layout = html.Div([
+            #########################Title
+            html.Div([html.H1("Co-occurrences of words in the corpus - Number of words : "+str(self.nb_words), id="title")],
+                      className="row",
+                      style={'textAlign': "center"}),
+            #############################################################################################define the row
+            html.Div(
+                className="row",
+                children=[
+                    ##############################################left side two input components
+                    html.Div(
+                        className="two columns",
+                        children=[
+                            html.Div(
+                                className="twelve columns",
+                                children=[
+                                    dcc.Markdown(d("**Corpus theme**")),
+                                    dcc.Input(id="theme", type="text", placeholder="Theme", value=self.THEME),
+                                    html.Div(id="output1"),
+                                    
+                                    dcc.Markdown(d("**Number of documents to download**")),
+                                    dcc.Input(id="nbdocs", type="number", value=self.NB_DOCS, min=1),
+                                    html.Div(id="output2"),
+                                    
+                                    html.Button('Reset the Corpus', id='reset')
+                                ],
+                                style={'height': '300px'}
+                            ),
+                            html.Div(
+                                className="twelve columns",
+                                children=[
+                                    dcc.Markdown(d("**Words To Search**")),
+                                    dcc.Input(id="words", type="text", placeholder="Words", value=self.WORDS, n_submit=1),
+                                    html.Div(id="output3")
+                                ],
+                                style={'height': '200px'}
+                            )
+                        ]
+                    ),
+        
+                    ############################################middle graph component
+                    html.Div(
+                        className="eight columns",
+                        children=[dcc.Graph(id="my-graph",
+                                            figure=self.FIG)]
+                    ),
+        
+                    #########################################right side two output component
+                    html.Div(
+                        className="two columns",
+                        children=[
+                            html.Div(
+                                className='twelve columns',
+                                children=[
+                                    dcc.Markdown(d("**Words metrics**")),
+                                    html.Pre(id='hover-data', style=styles['pre'])
+                                ],
+                                style={'height': '400px'}),
+        
+                            # html.Div(
+                            #     className='twelve columns',
+                            #     children=[
+                            #         dcc.Markdown(d("**Click Data**")),
+                            #         html.Pre(id='click-data', style=styles['pre'])
+                            #     ],
+                            #     style={'height': '400px'})
+                        ]
+                    )
+                ]
+            )
+        ])
     
-    app.layout = html.Div([
-        #########################Title
-        html.Div([html.H1("Co-occurrences des mots du Corpus \"Data\"")],
-                 className="row",
-                 style={'textAlign': "center"}),
-        #############################################################################################define the row
-        html.Div(
-            className="row",
-            children=[
-                ##############################################left side two input components
-                html.Div(
-                    className="two columns",
-                    children=[
-                        # dcc.Markdown(d("""
-                        #         **Time Range To Visualize**
-                        #         Slide the bar to define year range.
-                        #         """)),
-                        # html.Div(
-                        #     className="twelve columns",
-                        #     children=[
-                        #         dcc.RangeSlider(
-                        #             id='my-range-slider',
-                        #             min=2010,
-                        #             max=2019,
-                        #             step=1,
-                        #             value=[2010, 2019],
-                        #             marks={
-                        #                 2010: {'label': '2010'},
-                        #                 2011: {'label': '2011'},
-                        #                 2012: {'label': '2012'},
-                        #                 2013: {'label': '2013'},
-                        #                 2014: {'label': '2014'},
-                        #                 2015: {'label': '2015'},
-                        #                 2016: {'label': '2016'},
-                        #                 2017: {'label': '2017'},
-                        #                 2018: {'label': '2018'},
-                        #                 2019: {'label': '2019'}
-                        #             }
-                        #         ),
-                        #         html.Br(),
-                        #         html.Div(id='output-container-range-slider')
-                        #     ],
-                        #     style={'height': '300px'}
-                        # ),
-                        html.Div(
-                            className="twelve columns",
-                            children=[
-                                dcc.Markdown(d("""
-                                **Words To Search**
-                                Input the words to visualize.
-                                """)),
-                                dcc.Input(id="words", type="text", placeholder="Words", value="data;", n_submit=1),
-                                html.Div(id="output")
-                            ],
-                            style={'height': '300px'}
-                        )
-                    ]
-                ),
+    def launch(self):
+        # launch dash
+        self.app.run_server()
+
+    def network_graph(self):
+        WordsToSearch = set(self.WORDS.split(";"))
+        if "" in WordsToSearch:
+            WordsToSearch.remove("")
+        
+        #edge1 = pd.read_csv('edge1.csv')
+        #node1 = pd.read_csv('node1.csv')
+        
+        #filtre par rapport à l'input de filtre
+        words = WordsToSearch.copy()
+        if len(words) > 0:
+            words.update(self.A.loc[words].loc[:,(self.A.loc[words]!=0).any(axis=0)].columns)
+        else:
+            words.update(self.A.columns)
+        Ap = self.A.loc[words,words]
+        
+        #filtre sur les 30 mots les plus fréquents
+        # words = corpus.most_frequent_words(30)
+        
+        #filtre sur les stopwords
+        to_delete = []
+        for word in words:
+            if self.corpus.is_stop_words(word):
+                to_delete.append(word)
+        for word in to_delete:
+            words.remove(word)
+            # Ap = Ap.drop(word, axis=0)
+            # Ap = Ap.drop(word, axis=1)
+        Ap = Ap.loc[words,words]
+        
+        #filtre sur les mots plus fréquents que la moyenne
+        moyennes = Ap.mean()
+        moyenne = moyennes.mean()
+        words = set(moyennes[moyennes>=moyenne].index)
+        self.nb_words = len(words)
+        Ap = Ap.loc[words,words]
+        
+        #test de calcul des collocats
+        # for wordx in Ap.columns:
+        #     for wordy in Ap.index:
+        #         print(self.pmi_func(Ap, wordx, wordy))
+        
+        #calcul du graphe
+        edge1 = Ap.stack()
+        edge1 = edge1.reset_index()
+        edge1 = edge1[edge1[0] != 0]
+        edge1["from"] = edge1.apply(lambda x : min(x[["level_0","level_1"]]), axis=1)
+        edge1["to"] = edge1.apply(lambda x : max(x[["level_0","level_1"]]), axis=1)
+        edge1["qt"] = edge1[0]
+        edge1 = edge1.drop(columns=["level_0","level_1",0])
+        edge1 = edge1.drop_duplicates().reset_index(drop=True)
+        node1 = pd.DataFrame(Ap.index)
+        node1.columns = ("name",)
     
-                ############################################middle graph component
-                html.Div(
-                    className="eight columns",
-                    children=[dcc.Graph(id="my-graph",
-                                        figure=network_graph(ACCOUNT))],
-                ),
+        # filter the record by datetime, to enable interactive control through the input box
+        # edge1['Datetime'] = "" # add empty Datetime column to edge1 dataframe
+        accountSet=set() # contain unique account
+        for index in range(0,len(edge1)):
+            # edge1['Datetime'][index] = datetime.strptime(edge1['Date'][index], '%d/%m/%Y')
+            # if edge1['Datetime'][index].year<yearRange[0] or edge1['Datetime'][index].year>yearRange[1]:
+            #     edge1.drop(axis=0, index=index, inplace=True)
+            #     continue
+            accountSet.add(edge1['from'][index])
+            accountSet.add(edge1['to'][index])
     
-                #########################################right side two output component
-                html.Div(
-                    className="two columns",
-                    children=[
-                        html.Div(
-                            className='twelve columns',
-                            children=[
-                                dcc.Markdown(d("""
-                                **Hover Data**
-                                Mouse over values in the graph.
-                                """)),
-                                html.Pre(id='hover-data', style=styles['pre'])
-                            ],
-                            style={'height': '400px'}),
+        # to define the centric point of the networkx layout
+        shells=[]
+        shell1=[]
+        shell1.extend(WordsToSearch)
+        shells.append(shell1)
+        shell2=[]
+        for ele in accountSet:
+            if ele!=WordsToSearch:
+                shell2.append(ele)
+        shells.append(shell2)
     
-                        html.Div(
-                            className='twelve columns',
-                            children=[
-                                dcc.Markdown(d("""
-                                **Click Data**
-                                Click on points in the graph.
-                                """)),
-                                html.Pre(id='click-data', style=styles['pre'])
-                            ],
-                            style={'height': '400px'})
-                    ]
-                )
-            ]
-        )
-    ])
     
-    # Lancement de l'appli
-    app.run_server()
+        self.G = nx.from_pandas_edgelist(edge1, 'from', 'to', ['from', 'to', 'qt'], create_using=nx.Graph())
+        # nx.set_node_attributes(self.G, node1.set_index('Account')['CustomerName'].to_dict(), 'CustomerName')
+        # nx.set_node_attributes(self.G, node1.set_index('Account')['Type'].to_dict(), 'Type')
+        # pos = nx.layout.spring_layout(self.G)
+        # pos = nx.layout.circular_layout(self.G)
+        # nx.layout.shell_layout only works for more than 3 nodes
+        if len(shell2)>1:
+            pos = nx.drawing.layout.random_layout(self.G, dim=2, center=None)
+        else:
+            pos = nx.drawing.layout.spring_layout(self.G)
+        for node in self.G.nodes:
+            self.G.nodes[node]['pos'] = list(pos[node])
+        
+        
     
-
-##############################################################################################################################################################
-def network_graph(WordsToSearch):
-    WordsToSearch = set(WordsToSearch.split(";"))
-    if "" in WordsToSearch:
-        WordsToSearch.remove("")
+        # if len(shell2)==0:
+        #     traceRecode = []  # contains edge_trace, node_trace, middle_node_trace
     
-    #edge1 = pd.read_csv('edge1.csv')
-    #node1 = pd.read_csv('node1.csv')
+        #     node_trace = go.Scatter(x=tuple([1]), y=tuple([1]), text=tuple([str(AccountToSearch)]), textposition="bottom center",
+        #                             mode='markers+text',
+        #                             marker={'size': 50, 'color': 'LightSkyBlue'})
+        #     traceRecode.append(node_trace)
     
-    #filtre par rapport à l'input de filtre
-    words = WordsToSearch.copy()
-    if len(words) > 0:
-        words.update(A.loc[words].loc[:,(A.loc[words]!=0).any(axis=0)].columns)
-    else:
-        words.update(A.columns)
-    Ap = A.loc[words,words]
+        #     node_trace1 = go.Scatter(x=tuple([1]), y=tuple([1]),
+        #                             mode='markers',
+        #                             marker={'size': 50, 'color': 'LightSkyBlue'},
+        #                             opacity=0)
+        #     traceRecode.append(node_trace1)
     
-    #filtre sur les 30 mots les plus fréquents
-    # words = corpus.most_frequent_words(30)
+        #     figure = {
+        #         "data": traceRecode,
+        #         "layout": go.Layout(title='Interactive Transaction Visualization', showlegend=False,
+        #                             margin={'b': 40, 'l': 40, 'r': 40, 't': 40},
+        #                             xaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
+        #                             yaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
+        #                             height=600
+        #                             )}
+        #     return figure
     
-    #filtre sur les stopwords
-    to_delete = []
-    for word in words:
-        if corpus.is_stop_words(word):
-            to_delete.append(word)
-    for word in to_delete:
-        words.remove(word)
-        # Ap = Ap.drop(word, axis=0)
-        # Ap = Ap.drop(word, axis=1)
-    Ap = Ap.loc[words,words]
     
-    #filtre sur les mots plus fréquents que la moyenne
-    moyennes = Ap.mean()
-    moyenne = moyennes.mean()
-    words = set(moyennes[moyennes>=moyenne].index)
-    Ap = Ap.loc[words,words]
+        traceRecode = []  # contains edge_trace, node_trace, middle_node_trace
+        ############################################################################################################################################################
+        colors = list(Color('lightyellow').range_to(Color('darkred'), max(edge1['qt'])-min(edge1['qt'])+1))
+        colors = ['rgb' + color_to_str(x.rgb) for x in colors]
     
-    #calcul du graphe
-    edge1 = Ap.stack()
-    edge1 = edge1.reset_index()
-    edge1 = edge1[edge1[0] != 0]
-    edge1["from"] = edge1.apply(lambda x : min(x[["level_0","level_1"]]), axis=1)
-    edge1["to"] = edge1.apply(lambda x : max(x[["level_0","level_1"]]), axis=1)
-    edge1["qt"] = edge1[0]
-    edge1 = edge1.drop(columns=["level_0","level_1",0])
-    edge1 = edge1.drop_duplicates().reset_index(drop=True)
-    node1 = pd.DataFrame(Ap.index)
-    node1.columns = ("name",)
+        # index = 0
+        for edge in self.G.edges:
+            x0, y0 = self.G.nodes[edge[0]]['pos']
+            x1, y1 = self.G.nodes[edge[1]]['pos']
+            #weight = float(self.G.edges[edge]['qt']) / max(edge1['qt']) * 10
+            trace = go.Scatter(x=tuple([x0, x1, None]), y=tuple([y0, y1, None]),
+                                mode='lines',
+                                line={'width': 1},
+                                marker=dict(color=colors[self.G.edges[edge]['qt']-min(edge1['qt'])]),
+                                line_shape='spline',
+                                opacity=1)
+            traceRecode.append(trace)
+            # index = index + 1
+        ###############################################################################################################################################################
+        node_trace = go.Scatter(x=[], y=[], hovertext=[], text=[], mode='markers+text', textposition="bottom center",
+                                #textfont=dict(color="Orange"),
+                                hoverinfo="text",
+                                marker={'size': 10, 'color': 'LightSkyBlue'})
+    
+        index = 0
+        for node in self.G.nodes():
+            x, y = self.G.nodes[node]['pos']
+            # hovertext = "name: " + node1['name'][index]
+            text = node1['name'][index]
+            node_trace['x'] += tuple([x])
+            node_trace['y'] += tuple([y])
+            # node_trace['hovertext'] += tuple([hovertext])
+            node_trace['text'] += tuple([text])
+            index = index + 1
+    
+        traceRecode.append(node_trace)
+        ################################################################################################################################################################
+        # middle_hover_trace = go.Scatter(x=[], y=[], hovertext=[], mode='markers', hoverinfo="text",
+        #                                 marker={'size': 20, 'color': 'LightSkyBlue'},
+        #                                 opacity=0)
+    
+        # index = 0
+        # for edge in self.G.edges:
+        #     x0, y0 = self.G.nodes[edge[0]]['pos']
+        #     x1, y1 = self.G.nodes[edge[1]]['pos']
+        #     hovertext = "From: " + str(self.G.edges[edge]['from']) + "<br>" + "To: " + str(
+        #         self.G.edges[edge]['to']) + "<br>" + "qt: " + strself.G.edges[edge]['qt'])
+        #     middle_hover_trace['x'] += tuple([(x0 + x1) / 2])
+        #     middle_hover_trace['y'] += tuple([(y0 + y1) / 2])
+        #     middle_hover_trace['hovertext'] += tuple([hovertext])
+        #     index = index + 1
+    
+        # traceRecode.append(middle_hover_trace)
+        #################################################################################################################################################################
+        figure = {
+            "data": traceRecode,
+            "layout": go.Layout(#title='Co-occurrences des mots '+str(WordsToSearch)+"\nNombre de noeuds : "+str(len(words)),
+                                showlegend=False, hovermode='closest',
+                                margin={'b': 40, 'l': 40, 'r': 40, 't': 40},
+                                xaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
+                                yaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
+                                height=600,
+                                clickmode='event+select',
+                                # annotations=[
+                                #     dict(
+                                #         # ax=(self.G.nodes[edge[0]]['pos'][0] + self.G.nodes[edge[1]]['pos'][0]) / 2,
+                                #         # ay=(self.G.nodes[edge[0]]['pos'][1] + self.G.nodes[edge[1]]['pos'][1]) / 2, axref='x', ayref='y',
+                                #         # x=(self.G.nodes[edge[1]]['pos'][0] * 3 + self.G.nodes[edge[0]]['pos'][0]) / 4,
+                                #         # y=(self.G.nodes[edge[1]]['pos'][1] * 3 + self.G.nodes[edge[0]]['pos'][1]) / 4, xref='x', yref='y',
+                                #         ax = self.G.nodes[edge[0]]['pos'][0],
+                                #         ay = self.G.nodes[edge[0]]['pos'][1], axref='x', ayref='y',
+                                #         x = self.G.nodes[edge[1]]['pos'][0],
+                                #         y = self.G.nodes[edge[1]]['pos'][1], xref='x', yref='y',
+                                #         showarrow=True,
+                                #         arrowhead=0,
+                                #         # arrowsize=4,
+                                #         # arrowwidth=1,
+                                #         opacity=1
+                                #     ) for edge in self.G.edges]
+                                )}
+        return figure
 
-    # filter the record by datetime, to enable interactive control through the input box
-    # edge1['Datetime'] = "" # add empty Datetime column to edge1 dataframe
-    accountSet=set() # contain unique account
-    for index in range(0,len(edge1)):
-        # edge1['Datetime'][index] = datetime.strptime(edge1['Date'][index], '%d/%m/%Y')
-        # if edge1['Datetime'][index].year<yearRange[0] or edge1['Datetime'][index].year>yearRange[1]:
-        #     edge1.drop(axis=0, index=index, inplace=True)
-        #     continue
-        accountSet.add(edge1['from'][index])
-        accountSet.add(edge1['to'][index])
+    #PMI Methode
+    # pmi function 
+    def pmi_func(self, A, x, y): 
+        freq_x = A.groupby(x).transform('count') 
+        freq_y = A.groupby(y).transform('count') 
+        freq_x_y = A.groupby([x, y]).transform('count') 
+        return np.log(len(A.index) * (freq_x_y/(freq_x * freq_y))) 
+    
+    # pmi with kernel density estimation  
+    def kernel_pmi_func(self, A, x, y): 
+        # reshape data 
+        x = np.array(A[x]) 
+        y = np.array(A[y]) 
+        x_y = np.stack((x, y), axis=-1) 
+        
+        # kernel density estimation 
+        kde_x = KernelDensity(kernel='gaussian', bandwidth=0.1).fit(x[:, np.newaxis]) 
+        kde_y = KernelDensity(kernel='gaussian', bandwidth=0.1).fit(y[:, np.newaxis]) 
+        kde_x_y = KernelDensity(kernel='gaussian', bandwidth=0.1).fit(x_y) 
+        
+        # score 
+        p_x = pd.Series(np.exp(kde_x.score_samples(x[:, np.newaxis]))) 
+        p_y = pd.Series(np.exp(kde_y.score_samples(y[:, np.newaxis]))) 
+        p_x_y = pd.Series(np.exp(kde_x_y.score_samples(x_y))) 
+        
+        return np.log(p_x_y/(p_x * p_y)) 
 
-    # to define the centric point of the networkx layout
-    shells=[]
-    shell1=[]
-    shell1.extend(WordsToSearch)
-    shells.append(shell1)
-    shell2=[]
-    for ele in accountSet:
-        if ele!=WordsToSearch:
-            shell2.append(ele)
-    shells.append(shell2)
-
-
-    G = nx.from_pandas_edgelist(edge1, 'from', 'to', ['from', 'to', 'qt'], create_using=nx.MultiDiGraph())
-    # nx.set_node_attributes(G, node1.set_index('Account')['CustomerName'].to_dict(), 'CustomerName')
-    # nx.set_node_attributes(G, node1.set_index('Account')['Type'].to_dict(), 'Type')
-    # pos = nx.layout.spring_layout(G)
-    # pos = nx.layout.circular_layout(G)
-    # nx.layout.shell_layout only works for more than 3 nodes
-    if len(shell2)>1:
-        pos = nx.drawing.layout.shell_layout(G, shells)
-    else:
-        pos = nx.drawing.layout.spring_layout(G)
-    for node in G.nodes:
-        G.nodes[node]['pos'] = list(pos[node])
-
-
-    # if len(shell2)==0:
-    #     traceRecode = []  # contains edge_trace, node_trace, middle_node_trace
-
-    #     node_trace = go.Scatter(x=tuple([1]), y=tuple([1]), text=tuple([str(AccountToSearch)]), textposition="bottom center",
-    #                             mode='markers+text',
-    #                             marker={'size': 50, 'color': 'LightSkyBlue'})
-    #     traceRecode.append(node_trace)
-
-    #     node_trace1 = go.Scatter(x=tuple([1]), y=tuple([1]),
-    #                             mode='markers',
-    #                             marker={'size': 50, 'color': 'LightSkyBlue'},
-    #                             opacity=0)
-    #     traceRecode.append(node_trace1)
-
-    #     figure = {
-    #         "data": traceRecode,
-    #         "layout": go.Layout(title='Interactive Transaction Visualization', showlegend=False,
-    #                             margin={'b': 40, 'l': 40, 'r': 40, 't': 40},
-    #                             xaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
-    #                             yaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
-    #                             height=600
-    #                             )}
-    #     return figure
-
-
-    traceRecode = []  # contains edge_trace, node_trace, middle_node_trace
-    ############################################################################################################################################################
-    colors = list(Color('lightyellow').range_to(Color('darkred'), max(edge1['qt'])-min(edge1['qt'])+1))
-    colors = ['rgb' + color_to_str(x.rgb) for x in colors]
-
-    # index = 0
-    for edge in G.edges:
-        x0, y0 = G.nodes[edge[0]]['pos']
-        x1, y1 = G.nodes[edge[1]]['pos']
-        #weight = float(G.edges[edge]['qt']) / max(edge1['qt']) * 10
-        trace = go.Scatter(x=tuple([x0, x1, None]), y=tuple([y0, y1, None]),
-                            mode='lines',
-                            line={'width': 1},
-                            marker=dict(color=colors[G.edges[edge]['qt']-min(edge1['qt'])]),
-                            line_shape='spline',
-                            opacity=1)
-        traceRecode.append(trace)
-        # index = index + 1
-    ###############################################################################################################################################################
-    node_trace = go.Scatter(x=[], y=[], hovertext=[], text=[], mode='markers+text', textposition="bottom center",
-                            #textfont=dict(color="Orange"),
-                            hoverinfo="text",
-                            marker={'size': 10, 'color': 'LightSkyBlue'})
-
-    index = 0
-    for node in G.nodes():
-        x, y = G.nodes[node]['pos']
-        # hovertext = "name: " + node1['name'][index]
-        text = node1['name'][index]
-        node_trace['x'] += tuple([x])
-        node_trace['y'] += tuple([y])
-        # node_trace['hovertext'] += tuple([hovertext])
-        node_trace['text'] += tuple([text])
-        index = index + 1
-
-    traceRecode.append(node_trace)
-    ################################################################################################################################################################
-    # middle_hover_trace = go.Scatter(x=[], y=[], hovertext=[], mode='markers', hoverinfo="text",
-    #                                 marker={'size': 20, 'color': 'LightSkyBlue'},
-    #                                 opacity=0)
-
-    # index = 0
-    # for edge in G.edges:
-    #     x0, y0 = G.nodes[edge[0]]['pos']
-    #     x1, y1 = G.nodes[edge[1]]['pos']
-    #     hovertext = "From: " + str(G.edges[edge]['from']) + "<br>" + "To: " + str(
-    #         G.edges[edge]['to']) + "<br>" + "qt: " + str(G.edges[edge]['qt'])
-    #     middle_hover_trace['x'] += tuple([(x0 + x1) / 2])
-    #     middle_hover_trace['y'] += tuple([(y0 + y1) / 2])
-    #     middle_hover_trace['hovertext'] += tuple([hovertext])
-    #     index = index + 1
-
-    # traceRecode.append(middle_hover_trace)
-    #################################################################################################################################################################
-    figure = {
-        "data": traceRecode,
-        "layout": go.Layout(title='Co-occurrences des mots '+str(WordsToSearch)+"\nNombre de noeuds : "+str(len(words)), showlegend=False, hovermode='closest',
-                            margin={'b': 40, 'l': 40, 'r': 40, 't': 40},
-                            xaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
-                            yaxis={'showgrid': False, 'zeroline': False, 'showticklabels': False},
-                            height=600,
-                            clickmode='event+select',
-                            # annotations=[
-                            #     dict(
-                            #         # ax=(G.nodes[edge[0]]['pos'][0] + G.nodes[edge[1]]['pos'][0]) / 2,
-                            #         # ay=(G.nodes[edge[0]]['pos'][1] + G.nodes[edge[1]]['pos'][1]) / 2, axref='x', ayref='y',
-                            #         # x=(G.nodes[edge[1]]['pos'][0] * 3 + G.nodes[edge[0]]['pos'][0]) / 4,
-                            #         # y=(G.nodes[edge[1]]['pos'][1] * 3 + G.nodes[edge[0]]['pos'][1]) / 4, xref='x', yref='y',
-                            #         ax = G.nodes[edge[0]]['pos'][0],
-                            #         ay = G.nodes[edge[0]]['pos'][1], axref='x', ayref='y',
-                            #         x = G.nodes[edge[1]]['pos'][0],
-                            #         y = G.nodes[edge[1]]['pos'][1], xref='x', yref='y',
-                            #         showarrow=True,
-                            #         arrowhead=0,
-                            #         # arrowsize=4,
-                            #         # arrowwidth=1,
-                            #         opacity=1
-                            #     ) for edge in G.edges]
-                            )}
-    return figure
-
-
-###################################callback for left side components
-@app.callback(
-    dash.dependencies.Output('my-graph', 'figure'),
-    [dash.dependencies.Input('words', 'value'),
-     dash.dependencies.Input('words', 'n_submit')
-     ])
-def update_output(words, n):
-    global ACCOUNT
-    global NSUBMIT
-    global FIG
-    if FIG == None or n > NSUBMIT:
-        if n > NSUBMIT:
-            NSUBMIT = n
-            ACCOUNT = words
-        FIG = network_graph(ACCOUNT)
-        print("finished")
-    return FIG
-    # to update the global variable of YEAR and ACCOUNT
-################################callback for right side components
-@app.callback(
-    dash.dependencies.Output('hover-data', 'children'),
-    [dash.dependencies.Input('my-graph', 'hoverData')])
-def display_hover_data(hoverData):
-    return json.dumps(hoverData, indent=2)
-
-
-@app.callback(
-    dash.dependencies.Output('click-data', 'children'),
-    [dash.dependencies.Input('my-graph', 'clickData')])
-def display_click_data(clickData):
-    return json.dumps(clickData, indent=2)
-
-
+    def callbacks(self):
+        ###################################callback for the filter and the corpus settings components
+        @self.app.callback(
+            [dash.dependencies.Output('my-graph', 'figure'),
+             dash.dependencies.Output('title', 'children')
+             ],
+            [dash.dependencies.Input('words', 'value'),
+             dash.dependencies.Input('words', 'n_submit'),
+             dash.dependencies.Input("reset", "n_clicks"),
+             dash.dependencies.Input('theme', 'value'),
+             dash.dependencies.Input('nbdocs', 'value')
+             ])
+        def update_output(words, ns, nc, theme, nb_docs):
+            if nc > self.NSUBMIT_corpus:
+                self.NSUBMIT_corpus = nc
+                if self.FIG == None or self.THEME != theme or self.NB_DOCS != nb_docs:
+                    self.setup_corpus(theme, nb_docs)
+                    self.FIG = self.network_graph()
+            elif ns > self.NSUBMIT_words:
+                self.NSUBMIT_words = ns
+                self.WORDS = words
+                self.FIG = self.network_graph()
+            return self.FIG, "Co-occurrences of words in the corpus - Number of words : "+str(self.nb_words)
+        
+        ################################callback for the nodes hovering
+        @self.app.callback(
+            dash.dependencies.Output('hover-data', 'children'),
+            dash.dependencies.Input('my-graph', 'hoverData'))
+        def display_hover_data(hoverData):
+            word = hoverData["points"][0]["text"]
+            
+            if word not in self.DEGCEN:
+                self.DEGCEN[word] = nx.degree_centrality(self.G)[word]
+            if word not in self.CLOCEN:
+                self.CLOCEN[word] = nx.closeness_centrality(self.G, word)
+            if word not in self.BETCEN:
+                self.BETCEN[word] = nx.betweenness_centrality(self.G)[word]
+            
+            datas = {"Word": word,
+                      "Degree centrality": self.DEGCEN[word],
+                      "Closeness centrality": self.CLOCEN[word],
+                      "Betweenness centrality": self.BETCEN[word]}
+            return json.dumps(datas, indent=2)
+        
+        ################################callback for the nodes clicking
+        # @self.app.callback(
+        #     dash.dependencies.Output('click-data', 'children'),
+        #     [dash.dependencies.Input('my-graph', 'clickData')])
+        # def display_click_data(clickData):
+        #     word = clickData["points"][0]["text"]
+        #     return word
 
 if __name__ == '__main__':
-    main(theme="data", nb_docs=20)
+    app = App(theme="data", nb_docs=20)
