@@ -33,14 +33,131 @@ external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 app.title = "Transaction Network"
 
-ACCOUNT="data;"
-NSUBMIT=0
-FIG=None
-
-nb_docs = 3
-corpus = Corpus("data")
-corpus.download_collection(nb_docs)
-A = corpus.get_adjacency_matrix()
+def main(theme="data", nb_docs=20):
+    global ACCOUNT
+    global NSUBMIT
+    global FIG
+    global corpus
+    global A
+    
+    ACCOUNT = theme+";"
+    NSUBMIT = 0
+    FIG = None
+    
+    corpus = Corpus(theme)
+    corpus.download_collection(nb_docs)
+    A = corpus.get_adjacency_matrix()
+    
+    
+    ######################################################################################################################################################################
+    # styles: for right side hover/click component
+    styles = {
+        'pre': {
+            'border': 'thin lightgrey solid',
+            'overflowX': 'scroll'
+        }
+    }
+    
+    app.layout = html.Div([
+        #########################Title
+        html.Div([html.H1("Co-occurrences des mots du Corpus \"Data\"")],
+                 className="row",
+                 style={'textAlign': "center"}),
+        #############################################################################################define the row
+        html.Div(
+            className="row",
+            children=[
+                ##############################################left side two input components
+                html.Div(
+                    className="two columns",
+                    children=[
+                        # dcc.Markdown(d("""
+                        #         **Time Range To Visualize**
+                        #         Slide the bar to define year range.
+                        #         """)),
+                        # html.Div(
+                        #     className="twelve columns",
+                        #     children=[
+                        #         dcc.RangeSlider(
+                        #             id='my-range-slider',
+                        #             min=2010,
+                        #             max=2019,
+                        #             step=1,
+                        #             value=[2010, 2019],
+                        #             marks={
+                        #                 2010: {'label': '2010'},
+                        #                 2011: {'label': '2011'},
+                        #                 2012: {'label': '2012'},
+                        #                 2013: {'label': '2013'},
+                        #                 2014: {'label': '2014'},
+                        #                 2015: {'label': '2015'},
+                        #                 2016: {'label': '2016'},
+                        #                 2017: {'label': '2017'},
+                        #                 2018: {'label': '2018'},
+                        #                 2019: {'label': '2019'}
+                        #             }
+                        #         ),
+                        #         html.Br(),
+                        #         html.Div(id='output-container-range-slider')
+                        #     ],
+                        #     style={'height': '300px'}
+                        # ),
+                        html.Div(
+                            className="twelve columns",
+                            children=[
+                                dcc.Markdown(d("""
+                                **Words To Search**
+                                Input the words to visualize.
+                                """)),
+                                dcc.Input(id="words", type="text", placeholder="Words", value="data;", n_submit=1),
+                                html.Div(id="output")
+                            ],
+                            style={'height': '300px'}
+                        )
+                    ]
+                ),
+    
+                ############################################middle graph component
+                html.Div(
+                    className="eight columns",
+                    children=[dcc.Graph(id="my-graph",
+                                        figure=network_graph(ACCOUNT))],
+                ),
+    
+                #########################################right side two output component
+                html.Div(
+                    className="two columns",
+                    children=[
+                        html.Div(
+                            className='twelve columns',
+                            children=[
+                                dcc.Markdown(d("""
+                                **Hover Data**
+                                Mouse over values in the graph.
+                                """)),
+                                html.Pre(id='hover-data', style=styles['pre'])
+                            ],
+                            style={'height': '400px'}),
+    
+                        html.Div(
+                            className='twelve columns',
+                            children=[
+                                dcc.Markdown(d("""
+                                **Click Data**
+                                Click on points in the graph.
+                                """)),
+                                html.Pre(id='click-data', style=styles['pre'])
+                            ],
+                            style={'height': '400px'})
+                    ]
+                )
+            ]
+        )
+    ])
+    
+    # Lancement de l'appli
+    app.run_server()
+    
 
 ##############################################################################################################################################################
 def network_graph(WordsToSearch):
@@ -57,17 +174,30 @@ def network_graph(WordsToSearch):
         words.update(A.loc[words].loc[:,(A.loc[words]!=0).any(axis=0)].columns)
     else:
         words.update(A.columns)
-    Ap = A.loc[words]
+    Ap = A.loc[words,words]
     
     #filtre sur les 30 mots les plus fréquents
     # words = corpus.most_frequent_words(30)
+    
+    #filtre sur les stopwords
+    to_delete = []
+    for word in words:
+        if corpus.is_stop_words(word):
+            to_delete.append(word)
+    for word in to_delete:
+        words.remove(word)
+        # Ap = Ap.drop(word, axis=0)
+        # Ap = Ap.drop(word, axis=1)
+    Ap = Ap.loc[words,words]
     
     #filtre sur les mots plus fréquents que la moyenne
     moyennes = Ap.mean()
     moyenne = moyennes.mean()
     words = set(moyennes[moyennes>=moyenne].index)
+    Ap = Ap.loc[words,words]
     
-    edge1 = Ap.loc[words,words].stack()
+    #calcul du graphe
+    edge1 = Ap.stack()
     edge1 = edge1.reset_index()
     edge1 = edge1[edge1[0] != 0]
     edge1["from"] = edge1.apply(lambda x : min(x[["level_0","level_1"]]), axis=1)
@@ -75,7 +205,7 @@ def network_graph(WordsToSearch):
     edge1["qt"] = edge1[0]
     edge1 = edge1.drop(columns=["level_0","level_1",0])
     edge1 = edge1.drop_duplicates().reset_index(drop=True)
-    node1 = pd.DataFrame(A.index)
+    node1 = pd.DataFrame(Ap.index)
     node1.columns = ("name",)
 
     # filter the record by datetime, to enable interactive control through the input box
@@ -220,111 +350,7 @@ def network_graph(WordsToSearch):
                             #     ) for edge in G.edges]
                             )}
     return figure
-######################################################################################################################################################################
-# styles: for right side hover/click component
-styles = {
-    'pre': {
-        'border': 'thin lightgrey solid',
-        'overflowX': 'scroll'
-    }
-}
 
-app.layout = html.Div([
-    #########################Title
-    html.Div([html.H1("Co-occurrences des mots du Corpus \"Data\"")],
-             className="row",
-             style={'textAlign': "center"}),
-    #############################################################################################define the row
-    html.Div(
-        className="row",
-        children=[
-            ##############################################left side two input components
-            html.Div(
-                className="two columns",
-                children=[
-                    # dcc.Markdown(d("""
-                    #         **Time Range To Visualize**
-                    #         Slide the bar to define year range.
-                    #         """)),
-                    # html.Div(
-                    #     className="twelve columns",
-                    #     children=[
-                    #         dcc.RangeSlider(
-                    #             id='my-range-slider',
-                    #             min=2010,
-                    #             max=2019,
-                    #             step=1,
-                    #             value=[2010, 2019],
-                    #             marks={
-                    #                 2010: {'label': '2010'},
-                    #                 2011: {'label': '2011'},
-                    #                 2012: {'label': '2012'},
-                    #                 2013: {'label': '2013'},
-                    #                 2014: {'label': '2014'},
-                    #                 2015: {'label': '2015'},
-                    #                 2016: {'label': '2016'},
-                    #                 2017: {'label': '2017'},
-                    #                 2018: {'label': '2018'},
-                    #                 2019: {'label': '2019'}
-                    #             }
-                    #         ),
-                    #         html.Br(),
-                    #         html.Div(id='output-container-range-slider')
-                    #     ],
-                    #     style={'height': '300px'}
-                    # ),
-                    html.Div(
-                        className="twelve columns",
-                        children=[
-                            dcc.Markdown(d("""
-                            **Words To Search**
-                            Input the words to visualize.
-                            """)),
-                            dcc.Input(id="words", type="text", placeholder="Words", value="data;", n_submit=1),
-                            html.Div(id="output")
-                        ],
-                        style={'height': '300px'}
-                    )
-                ]
-            ),
-
-            ############################################middle graph component
-            html.Div(
-                className="eight columns",
-                children=[dcc.Graph(id="my-graph",
-                                    figure=network_graph(ACCOUNT))],
-            ),
-
-            #########################################right side two output component
-            html.Div(
-                className="two columns",
-                children=[
-                    html.Div(
-                        className='twelve columns',
-                        children=[
-                            dcc.Markdown(d("""
-                            **Hover Data**
-                            Mouse over values in the graph.
-                            """)),
-                            html.Pre(id='hover-data', style=styles['pre'])
-                        ],
-                        style={'height': '400px'}),
-
-                    html.Div(
-                        className='twelve columns',
-                        children=[
-                            dcc.Markdown(d("""
-                            **Click Data**
-                            Click on points in the graph.
-                            """)),
-                            html.Pre(id='click-data', style=styles['pre'])
-                        ],
-                        style={'height': '400px'})
-                ]
-            )
-        ]
-    )
-])
 
 ###################################callback for left side components
 @app.callback(
@@ -361,4 +387,4 @@ def display_click_data(clickData):
 
 
 if __name__ == '__main__':
-    app.run_server()
+    main(theme="data", nb_docs=20)

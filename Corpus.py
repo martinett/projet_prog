@@ -5,6 +5,8 @@ import pickle
 import re
 import pandas as pd
 import numpy as np
+import nltk
+from nltk.corpus import stopwords
 
 from Document import Document
 from Auteur import Auteur
@@ -28,6 +30,7 @@ class Corpus:
         self.frequencies = pd.DataFrame(columns=("term frequency", "document frequency"))
         self.A = pd.DataFrame()
         self.update = False
+        nltk.download('stopwords', quiet=True)
     
     def _get_reddit_posts_as_documents(self, n, keyword="data"):
         hot_posts = reddit.subreddit(keyword).hot(limit=n)
@@ -168,6 +171,9 @@ class Corpus:
         if self.update:
             self.words_frequency()
         return self.frequencies["word"][:n]
+    
+    def is_stop_words(self, word):
+        return word in stopwords.words('english')
 
     def get_adjacency_matrix(self):
         if self.update:
