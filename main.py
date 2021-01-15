@@ -163,6 +163,7 @@ class App:
         if "" in WordsToSearch:
             WordsToSearch.remove("")
         
+        ############################################## FILTRES ####################################################
         #filtre par rapport à l'input de filtre
         words = WordsToSearch.copy()
         #si il y a des mots dans le filtre
@@ -199,6 +200,8 @@ class App:
         moyenne = moyennes.mean()
         words = list(moyennes[moyennes>=moyenne].index)
         Ap = Ap.loc[words,words]
+        
+        ###########################################################################################################
         
         #test de calcul des collocats
         # for wordx in Ap.columns:
@@ -329,22 +332,6 @@ class App:
         freq_x_y = A.groupby([x, y]).transform('count')
         return np.log(len(A.index) * (freq_x_y/(freq_x * freq_y)))
     
-    #approximation de la méthode PMI avec KernelDensity
-    def kernel_pmi_func(self, A, x, y):
-        x = np.array(A[x])
-        y = np.array(A[y])
-        x_y = np.stack((x, y), axis=-1)
-        
-        kde_x = KernelDensity(kernel='gaussian', bandwidth=0.1).fit(x[:, np.newaxis])
-        kde_y = KernelDensity(kernel='gaussian', bandwidth=0.1).fit(y[:, np.newaxis])
-        kde_x_y = KernelDensity(kernel='gaussian', bandwidth=0.1).fit(x_y)
-        
-        p_x = pd.Series(np.exp(kde_x.score_samples(x[:, np.newaxis])))
-        p_y = pd.Series(np.exp(kde_y.score_samples(y[:, np.newaxis])))
-        p_x_y = pd.Series(np.exp(kde_x_y.score_samples(x_y)))
-        
-        return np.log(p_x_y/(p_x * p_y))
-
     def callbacks(self):
         ###################################événements pour le reset de corpus et le filtre de mots
         @self.app.callback(
