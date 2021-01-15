@@ -136,7 +136,7 @@ class App:
                                     dcc.Markdown(d("**Words metrics**")),
                                     html.Pre(id='hover-data', style=styles['pre'])
                                 ],
-                                style={'height': '400px'}),
+                                style={'height': '250px'}),
         
                             html.Div(
                                 className='twelve columns',
@@ -144,7 +144,7 @@ class App:
                                     dcc.Markdown(d("**Click Data**")),
                                     html.Pre(id='click-data', style=styles['pre'])
                                 ],
-                                style={'height': '400px'})
+                                style={'height': '250px'})
                         ]
                     )
                 ]
@@ -438,7 +438,7 @@ class App:
                          "Closeness centrality": self.CLOCEN[word],
                          "Betweenness centrality": self.BETCEN[word]}
                 return json.dumps(datas, indent=2)
-
+        
 if __name__ == '__main__':
     #si on exécute ce fichier, l'appli se lancera avec de base un corpus à 20 documents sur le thème de la data
     app = App(theme="data", nb_docs=20)
