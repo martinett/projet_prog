@@ -12,6 +12,7 @@ from colour import Color
 from textwrap import dedent as d
 import json
 import decimal
+from math import ceil, log
 
 from Corpus import Corpus
 
@@ -149,7 +150,7 @@ class App:
         self.app.run_server()
 
     def network_graph(self):
-        WordsToSearch = set(self.WORDS.split(";"))
+        WordsToSearch = list(set(self.WORDS.split(";")))
         if "" in WordsToSearch:
             WordsToSearch.remove("")
         
@@ -159,9 +160,10 @@ class App:
         #filtre par rapport à l'input de filtre
         words = WordsToSearch.copy()
         if len(words) > 0:
-            words.update(self.A.loc[words].loc[:,(self.A.loc[words]!=0).any(axis=0)].columns)
+            words.extend(self.A.loc[words].loc[:,(self.A.loc[words]!=0).any(axis=0)].columns)
         else:
-            words.update(self.A.columns)
+            words.extend(self.A.columns)
+        words = list(set(words))
         Ap = self.A.loc[words,words]
         
         #filtre sur les 30 mots les plus fréquents
@@ -179,16 +181,24 @@ class App:
         Ap = Ap.loc[words,words]
         
         #filtre sur les mots plus fréquents que la moyenne
+        freq = self.corpus.frequencies
+        freq = freq.loc[freq.index.isin(Ap.index)]
+        term_freq_mean = freq["term frequency"].mean()
+        words = list(freq[freq["term frequency"] >= term_freq_mean].index)
+        Ap = Ap.loc[words,words]
+        
+        #filtre sur les mots plus co-occurrents que la moyenne
         moyennes = Ap.mean()
         moyenne = moyennes.mean()
-        words = set(moyennes[moyennes>=moyenne].index)
-        self.nb_words = len(words)
+        words = list(moyennes[moyennes>=moyenne].index)
         Ap = Ap.loc[words,words]
         
         #test de calcul des collocats
         # for wordx in Ap.columns:
         #     for wordy in Ap.index:
         #         print(self.pmi_func(Ap, wordx, wordy))
+        
+        self.nb_words = len(words)
         
         #calcul du graphe
         edge1 = Ap.stack()
@@ -202,39 +212,42 @@ class App:
         node1 = pd.DataFrame(Ap.index)
         node1.columns = ("name",)
     
-        # filter the record by datetime, to enable interactive control through the input box
-        # edge1['Datetime'] = "" # add empty Datetime column to edge1 dataframe
-        accountSet=set() # contain unique account
-        for index in range(0,len(edge1)):
-            # edge1['Datetime'][index] = datetime.strptime(edge1['Date'][index], '%d/%m/%Y')
-            # if edge1['Datetime'][index].year<yearRange[0] or edge1['Datetime'][index].year>yearRange[1]:
-            #     edge1.drop(axis=0, index=index, inplace=True)
-            #     continue
-            accountSet.add(edge1['from'][index])
-            accountSet.add(edge1['to'][index])
-    
-        # to define the centric point of the networkx layout
-        shells=[]
-        shell1=[]
-        shell1.extend(WordsToSearch)
-        shells.append(shell1)
-        shell2=[]
-        for ele in accountSet:
-            if ele!=WordsToSearch:
-                shell2.append(ele)
-        shells.append(shell2)
-    
-    
         self.G = nx.from_pandas_edgelist(edge1, 'from', 'to', ['from', 'to', 'qt'], create_using=nx.Graph())
-        # nx.set_node_attributes(self.G, node1.set_index('Account')['CustomerName'].to_dict(), 'CustomerName')
-        # nx.set_node_attributes(self.G, node1.set_index('Account')['Type'].to_dict(), 'Type')
-        # pos = nx.layout.spring_layout(self.G)
-        # pos = nx.layout.circular_layout(self.G)
-        # nx.layout.shell_layout only works for more than 3 nodes
-        if len(shell2)>1:
-            pos = nx.drawing.layout.random_layout(self.G, dim=2, center=None)
+        
+        base = 3
+        nwords = len(words)
+        initinA = list(Ap.index[Ap.index.isin(WordsToSearch)])
+        ninitinA = len(initinA)
+        n = nwords-ninitinA
+        if ninitinA > 0:
+            nb_shells = ceil(log(n,base)-log(ninitinA,base))
         else:
-            pos = nx.drawing.layout.spring_layout(self.G)
+            nb_shells = ceil(log(n,base))
+        s = (base-1)*n/(base**nb_shells-1)
+        if ninitinA > 0:
+            shells = [WordsToSearch]
+            flat_shells = initinA.copy()
+        else:
+            shells = []
+            flat_shells = []
+        for i in range(int(nb_shells+0.5)-1):
+            x = ceil(s*base**i)
+            if len(flat_shells) > 0:
+                shell = list(Ap[Ap.loc[flat_shells] != 0].loc[:,~Ap.index.isin(flat_shells)].max().sort_values(ascending=False).head(x).index)
+            else:
+                shell = list(Ap.max().sort_values(ascending=False).head(x).index)
+            flat_shells.extend(shell)
+            shells.append(shell)
+        shell = list(Ap.index[~Ap.index.isin(flat_shells)])
+        shells.append(shell)
+        
+        pos = nx.drawing.layout.shell_layout(self.G, shells, dim=2)
+        # pos = nx.drawing.layout.random_layout(self.G, dim=2, center=None)
+        # pos = nx.drawing.layout.spring_layout(self.G)
+        # pos = nx.drawing.layout.kamada_kawai_layout(self.G)
+        # pos = nx.drawing.layout.spectral_layout(self.G)
+        # pos = nx.drawing.layout.spiral_layout(self.G)
+        
         for node in self.G.nodes:
             self.G.nodes[node]['pos'] = list(pos[node])
         
@@ -269,6 +282,7 @@ class App:
         ############################################################################################################################################################
         colors = list(Color('lightyellow').range_to(Color('darkred'), max(edge1['qt'])-min(edge1['qt'])+1))
         colors = ['rgb' + color_to_str(x.rgb) for x in colors]
+        alphas = [((i-min(edge1['qt']))/(max(edge1['qt'])-min(edge1['qt']))/10)+0.05 for i in range(min(edge1['qt']),max(edge1['qt'])+1)]
     
         # index = 0
         for edge in self.G.edges:
@@ -280,14 +294,15 @@ class App:
                                 line={'width': 1},
                                 marker=dict(color=colors[self.G.edges[edge]['qt']-min(edge1['qt'])]),
                                 line_shape='spline',
-                                opacity=1)
+                                opacity=alphas[self.G.edges[edge]['qt']-min(edge1['qt'])])
             traceRecode.append(trace)
             # index = index + 1
         ###############################################################################################################################################################
+        sizes = Ap.sum().values*5/len(words)+5
         node_trace = go.Scatter(x=[], y=[], hovertext=[], text=[], mode='markers+text', textposition="bottom center",
                                 #textfont=dict(color="Orange"),
                                 hoverinfo="text",
-                                marker={'size': 10, 'color': 'LightSkyBlue'})
+                                marker={'size': sizes, 'color': 'LightSkyBlue'})
     
         index = 0
         for node in self.G.nodes():
@@ -387,12 +402,12 @@ class App:
              dash.dependencies.Input('nbdocs', 'value')
              ])
         def update_output(words, ns, nc, theme, nb_docs):
-            if nc > self.NSUBMIT_corpus:
+            if nc != None and nc > self.NSUBMIT_corpus:
                 self.NSUBMIT_corpus = nc
                 if self.FIG == None or self.THEME != theme or self.NB_DOCS != nb_docs:
                     self.setup_corpus(theme, nb_docs)
                     self.FIG = self.network_graph()
-            elif ns > self.NSUBMIT_words:
+            elif ns != None and ns > self.NSUBMIT_words:
                 self.NSUBMIT_words = ns
                 self.WORDS = words
                 self.FIG = self.network_graph()
@@ -403,20 +418,25 @@ class App:
             dash.dependencies.Output('hover-data', 'children'),
             dash.dependencies.Input('my-graph', 'hoverData'))
         def display_hover_data(hoverData):
-            word = hoverData["points"][0]["text"]
+            if hoverData != None and "text" in hoverData["points"][0]:
+                word = hoverData["points"][0]["text"]
             
-            if word not in self.DEGCEN:
-                self.DEGCEN[word] = nx.degree_centrality(self.G)[word]
-            if word not in self.CLOCEN:
-                self.CLOCEN[word] = nx.closeness_centrality(self.G, word)
-            if word not in self.BETCEN:
-                self.BETCEN[word] = nx.betweenness_centrality(self.G)[word]
-            
-            datas = {"Word": word,
-                      "Degree centrality": self.DEGCEN[word],
-                      "Closeness centrality": self.CLOCEN[word],
-                      "Betweenness centrality": self.BETCEN[word]}
-            return json.dumps(datas, indent=2)
+                if word not in self.DEGCEN:
+                    self.DEGCEN[word] = nx.degree_centrality(self.G)[word]
+                if word not in self.CLOCEN:
+                    self.CLOCEN[word] = nx.closeness_centrality(self.G, word)
+                if word not in self.BETCEN:
+                    self.BETCEN[word] = nx.betweenness_centrality(self.G)[word]
+                
+                frequencies = self.corpus.get_frequencies(word)
+                
+                datas = {"Word": word,
+                         "Term frequency": int(frequencies["term frequency"].values[0]),
+                         "Document frequency": int(frequencies["document frequency"].values[0]),
+                         "Degree centrality": self.DEGCEN[word],
+                         "Closeness centrality": self.CLOCEN[word],
+                         "Betweenness centrality": self.BETCEN[word]}
+                return json.dumps(datas, indent=2)
         
         ################################callback for the nodes clicking
         # @self.app.callback(

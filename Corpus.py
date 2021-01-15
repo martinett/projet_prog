@@ -140,8 +140,8 @@ class Corpus:
         for docid in self.collection:
             texte = self.nettoyer_texte(self.collection[docid].texte)
             encountered = set()
-            words = set(texte.split(" "))
-            if "" in words:
+            words = list(texte.split(" "))
+            while "" in words:
                 words.remove("")
             for word in words:
                 if not word in vocab:
@@ -156,21 +156,22 @@ class Corpus:
             self.A.loc[words,words]+=1
             np.fill_diagonal(self.A.values, 0)
         df = pd.DataFrame.from_dict(vocab, orient="index", columns=("term frequency", "document frequency"))
-        df.index.names = ["word"]
-        df = df.reset_index()
-        df = df.sort_values("term frequency", ignore_index=True, ascending=False)
+        df = df.sort_values("term frequency", ascending=False)
         self.frequencies = df
     
     def stats(self, n):
         if self.update:
             self.words_frequency()
         print("Number of words :", len(self.frequencies))
-        print(self.frequencies[:n])
+        print(self.frequencies.index[:n])
     
     def most_frequent_words(self, n):
         if self.update:
             self.words_frequency()
-        return self.frequencies["word"][:n]
+        return self.frequencies.index[:n].values
+    
+    def get_frequencies(self, word):
+        return self.frequencies[self.frequencies.index == word]
     
     def is_stop_words(self, word):
         return word in stopwords.words('english')
@@ -180,18 +181,3 @@ class Corpus:
             self.words_frequency()
         return self.A
         
-        # words = ["a","b"]
-        # A = pd.DataFrame(0, columns=words, index=words)
-        # A.loc[words,words]+=1
-        # np.fill_diagonal(A.values, 0)
-        # A
-        
-        # words = ["a","c"]
-        # for word in words:
-        #     if word not in A:
-        #         A[word] = 0
-        #         A.loc[word] = 0
-        # A.loc[words,words]+=1
-        # np.fill_diagonal(A.values, 0)
-        # A
-
